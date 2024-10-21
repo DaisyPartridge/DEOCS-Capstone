@@ -1,0 +1,404 @@
+---
+title: "Math 378 Spring 2022 Project"
+author: "Professor Bradley Warner"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: 
+  pdf_document:
+    fig_height: 3
+    fig_width: 5
+  html_document:
+    fig_height: 3
+    fig_width: 5
+  word_document:
+    fig_height: 3
+    fig_width: 5
+---
+
+```{r, setup, include=FALSE}
+require(tidyverse)    # Load additional packages here 
+require(tidymodels) # formula interface to ggplot2
+
+theme_set(theme_classic()) # change theme for ggplot2
+
+knitr::opts_chunk$set(
+  tidy=FALSE,     # display code as typed
+  size="small")   # slightly smaller font for code
+```
+
+## Objective  
+
+This project has the following objectives:
+
+1) Give exposure to an extensive machine learning project.  
+2) Understand the need for subject matter expertise in a data analysis project. 
+3) Use ideas from text analysis to help solve a problem.  
+4) Use state-of-the-art machine learning ideas on a large actual problem. 
+
+## Authorized Resources
+
+Anyone or anything, but your submission must be your own individual work.
+
+## Introduction 
+
+As an introduction to our project, we use the first paragraph from the longer version of one of our literature review papers:
+
+> The Federalist papers were published anonymously in 1787-1788 by Alexander Hamilton, John Jay, and James Madison to persuade the citizens of the State of New York to ratify the Constitution. Of the 77 essays, 900 to 3500 words in length, that appeared in newspapers, it is generally agreed that Jay wrote five: Nos. 2, 3, 4, 5, and 64, leaving no further problem about Jay's share. Hamilton is identified as the author of 43 papers, Madison of 14. The authorship of 12 papers (Nos. 49-58, 62, and 63) is in dispute between Hamilton and Madison; finally, there are also three joint papers, Nos. 18, 19, and 20, where the issue is the extent of each man's contribution.
+
+We will explore the Federalist papers with the ultimate goal of assigning authorship to the disputed papers. You must use **tidymodels** for your modeling work.  
+
+## Part 1 - Literature Review (50 pts) Due M12 by 1600.
+
+Being an analyst requires us to have a deeper understanding of the problem, something called subject matter expertise. This can be acquired in many ways; for this project we will use a literature review with different media types.
+
+First, we will learn more about James Madison and Alexander Hamilton, the authors of interest. Then, we will learn about the political parties of the two. Next, we will learn about the Federalists papers. Finally, we will read about attempts to assign authorship to the disputed papers.  
+
+Complete the following tasks:
+
+1. (5 pts) Watch this [video](https://www.youtube.com/watch?v=PrK0CifulU0), by [Noah Feldman](https://en.wikipedia.org/wiki/Noah_Feldman). 
+
+2. (5 pts) To help in understanding Hamilton, watch these [facts](https://www.youtube.com/watch?v=CRJrZwLN5B8) and brief [biography](https://www.youtube.com/watch?v=rSvkctQ5peo). 
+
+3. (5 pts) To help in understanding James Madison, watch this [video](https://www.youtube.com/watch?v=dwsVSW8h4v4).
+
+4. (5 pts) To understand the political parties of Madison and Hamilton, read this [document](https://www.pbs.org/wgbh/americanexperience/features/duel-federalist-and-republican-party/). 
+
+5. (10 pts) To understand the Federalist papers, read Fifteen Curious Facts about the Federalist Papers provided in the materials for this project. 
+
+6. (10 pts) To read about an early attempt at predicting the authors of the disputed papers, read the paper "Deciding Authorship" by Frederick Mosteller and David Wallace provided in the materials for this project.
+
+7. (10 pts) Take a quiz on the material. This quiz will be timed and individual effort.  
+
+## Part 2 - Understanding the Problem (100 points) Due M25 by 1600.
+
+An analyst often explores the data and looks for other analysts' work as a starting point. In this section, you will use several sources to develop an exploratory analysis of the data and then re-create the work of a machine scientist. The following is a skeleton outline of what you need to do. This is a substantial report, so doing the bare minimum is not enough for a good score.  
+
+1. Import the data. Use the following code as a starting point. 
+
+```{r}
+library(tidytext)
+library(tidymodels) # Modeling framework
+library(themis)
+library(textrecipes) # extension to preprocessing engine to handle text
+library(stringr) # String modification
+library(gutenbergr) # Portal to download the Federalist Papers
+library(tokenizers) # Tokenization engine
+library(doParallel) # to be able to fit the models in parallel
+```
+
+```{r}
+papers <- gutenberg_download(1404)
+papers
+```
+
+
+2. Using information from the following site, https://bit.ly/3rdW1CM, create visual summaries of the data. Some options include facets by paper number, facet by author, using single words, using tri-grams, using tf-idf, and using the words for the Mosteller paper.
+
+
+
+
+```{r}
+# Download the Federalist Papers
+papers <- gutenberg_download(1404)
+
+# Assign paper numbers and authors
+papers <- papers %>%
+  mutate(no = cumsum(str_detect(text, regex("FEDERALIST No", ignore_case = TRUE)))) %>%
+  mutate(author = case_when(no %in% hamilton ~ "hamilton",
+                            no %in% madison ~ "madison",
+                            no %in% jay ~ "jay",
+                            no %in% unknown ~ "unknown"))
+
+# Tokenize text into words using tidytext's unnest_tokens
+library(tidytext)
+data("stop_words")
+
+# Tokenize text into words and remove stop words
+word_counts <- papers %>%
+  unnest_tokens(word, text) %>%          # Tokenizing into words
+  anti_join(stop_words, by = "word") %>% # Removing common stop words
+  count(author, word, sort = TRUE)       # Counting word frequencies by author
+
+
+```
+
+```{r}
+# Count the total number of words for each author
+total_words_by_author <- word_counts %>%
+  group_by(author) %>%
+  summarize(total_words = sum(n))
+
+# Normalize the word counts by the total words for each author
+word_counts_normalized <- word_counts %>%
+  inner_join(total_words_by_author, by = "author") %>%
+  mutate(normalized_n = n / total_words)  # Normalize frequency by total words
+
+```
+
+
+NOTE: I normalized the words for each author, because Hamilton wrote so many more essays
+than Jay or Madison. 
+
+```{r}
+
+# Visualize the normalized word frequencies
+ggplot(word_counts_normalized %>% filter(normalized_n > 0.005),  # Filtering based on normalized frequency
+       aes(x = fct_reorder(word, normalized_n), y = normalized_n, fill = author)) + 
+  geom_col() + 
+  guides(fill = FALSE) +
+  labs(x = "Word", y = "Normalized Frequency", 
+       title = "Normalized Word Frequency in Federalist Papers by Author") +
+  facet_wrap(vars(author), scales = "free_x") +  # Facet by author
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotate x-axis labels
+
+
+```
+
+This is tokening the text by bigrams, so we get frequency of pairs of words instead
+of single words. 
+
+```{r}
+# Define author names to filter out
+
+library(ggplot2) 
+
+author_names <- c("hamilton", "madison", "jay")
+
+# Create bigrams and filter out bigrams containing author names
+papers_bigrams <- papers %>%
+  drop_na(text) %>%
+  unnest_tokens(bigram, text, token = "ngrams", n = 2) %>%
+  separate(bigram, c("word1", "word2"), sep = " ") %>%
+  filter(!word1 %in% stop_words$word,
+         !word2 %in% stop_words$word) %>%
+  # Exclude bigrams containing author names
+  filter(!word1 %in% author_names, !word2 %in% author_names) %>%
+  # Put the two word columns back together
+  unite(bigram, word1, word2, sep = " ") %>%
+  # Remove "NA NA" bigrams
+  filter(bigram != "NA NA") %>%
+  count(author, bigram, sort = TRUE)  # Count bigrams
+
+
+```
+
+
+```{r}
+
+# Filter for the top bigrams for visualization
+top_bigrams <- papers_bigrams %>%
+  group_by(author) %>%
+  top_n(4, n) %>% # THIS is the parameter to edit for readability
+  ungroup() %>%
+  arrange(author, desc(n))
+
+# Plotting the bigrams using ggplot
+ggplot(top_bigrams, aes(x = fct_reorder(bigram, n), y = n, fill = author)) + 
+  geom_col(show.legend = FALSE) + 
+  facet_wrap(~ author, scales = "free_y") +  # Facet by author
+  labs(y = "Count", x = "Bigram", 
+       title = "Top Bigrams in the Federalist Papers by Author (Excluding Author Names)") +
+  theme_bw() + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotate x-axis labels
+```
+
+```{r}
+# Assuming you already have the papers data and author_names defined
+papers_words <- papers %>%
+  drop_na(text) %>% 
+  # Split into word tokens
+  unnest_tokens(word, text) %>% 
+  # Remove stop words and specific words
+  anti_join(stop_words) %>% 
+  filter(!word %in% c("the", "that", "a", "and", "to", "of", 
+                      "in", "for", "is", "on", "be", "with", 
+                      "as", "by", "not", "it", "at", 
+                      "thou", "thy", "haue", "thee", 
+                      "thine", "enter", "exeunt", "exit")) %>% 
+  count(author, word, sort = TRUE)
+
+# Add the tf-idf values to the counts
+papers_tf_idf <- papers_words %>% 
+  bind_tf_idf(word, author, n)
+
+# Get the top 10 unique words for each author
+papers_tf_idf_plot <- papers_tf_idf %>% 
+  arrange(desc(tf_idf)) %>% 
+  group_by(author) %>% 
+  top_n(10, tf_idf) %>% 
+  ungroup() %>% 
+  mutate(word = fct_inorder(word))
+
+# Create the ggplot visualization
+ggplot(papers_tf_idf_plot, 
+       aes(y = fct_rev(word), x = tf_idf, fill = author)) +
+  geom_col() +
+  guides(fill = FALSE) +
+  labs(x = "tf-idf", y = NULL, title = "Top 10 Unique Words by Author in Federalist Papers") +
+  facet_wrap(~ author, scales = "free") +
+  theme_bw()
+
+```
+
+Unique Bigrams by Author
+```{r}
+# Load necessary libraries
+library(tidyverse)
+library(tidytext)
+
+# Assuming you already have the papers data and author_names defined
+papers_bigrams <- papers %>%
+  drop_na(text) %>% 
+  # Split into bigram tokens
+  unnest_tokens(bigram, text, token = "ngrams", n = 3) %>% 
+  # Separate the bigrams into two columns to filter stop words
+  separate(bigram, into = c("word1", "word2"), sep = " ") %>% 
+  # Remove stop words and specific words from both columns
+  filter(!word1 %in% stop_words$word,
+         !word2 %in% stop_words$word) %>% 
+  filter(!word1 %in% c("the", "that", "a", "and", "to", "of", 
+                       "in", "for", "is", "on", "be", "with", 
+                       "as", "by", "not", "it", "at", 
+                       "thou", "thy", "haue", "thee", 
+                       "thine", "enter", "exeunt", "exit"),
+         !word2 %in% c("the", "that", "a", "and", "to", "of", 
+                       "in", "for", "is", "on", "be", "with", 
+                       "as", "by", "not", "it", "at", 
+                       "thou", "thy", "haue", "thee", 
+                       "thine", "enter", "exeunt", "exit")) %>% 
+  # Reunite the filtered bigrams
+  unite(bigram, word1, word2, sep = " ") %>% 
+  # Count the bigrams by author
+  count(author, bigram, sort = TRUE)
+
+# Add the tf-idf values to the bigram counts
+papers_bigrams_tf_idf <- papers_bigrams %>% 
+  bind_tf_idf(bigram, author, n)
+
+# Get the top 10 unique bigrams for each author
+papers_bigrams_tf_idf_plot <- papers_bigrams_tf_idf %>% 
+  arrange(desc(tf_idf)) %>% 
+  group_by(author) %>% 
+  top_n(7, tf_idf) %>% 
+  ungroup() %>% 
+  mutate(bigram = fct_inorder(bigram))
+
+# Create the ggplot visualization
+ggplot(papers_bigrams_tf_idf_plot, 
+       aes(y = fct_rev(bigram), x = tf_idf, fill = author)) +
+  geom_col() +
+  guides(fill = FALSE) +
+  labs(x = "tf-idf", y = NULL, title = "Top 10 Unique Bigrams by Author in Federalist Papers") +
+  facet_wrap(~ author, scales = "free") +
+  theme_bw()
+
+```
+
+
+
+
+
+
+
+Sentiment Analysis
+```{r}
+library(tidytext)
+library(dplyr)
+library(ggplot2)
+
+# Perform sentiment analysis on the Federalist Papers
+papers_sentiment <- papers %>%  
+  drop_na(text) %>% 
+  # Split into word tokens
+  unnest_tokens(word, text) %>% 
+  # Remove stop words and specific old timey words
+  anti_join(stop_words) %>% 
+  filter(!word %in% c("the", "that", "a", "and", "to", "of", 
+                      "in", "for", "is", "on", "be", "with", 
+                      "as", "by", "not", "it", "at", 
+                      "thou", "thy", "haue", "thee", 
+                      "thine", "enter", "exeunt", "exit")) %>%
+  # Join the sentiment dictionary
+  inner_join(get_sentiments("bing")) # You can choose other lexicons like "nrc" or "afinn" as well
+
+# Count sentiments by author
+papers_sentiment_count <- papers_sentiment %>% 
+  count(author, sentiment)
+
+# Create the ggplot visualization
+ggplot(papers_sentiment_count, aes(x = sentiment, y = n, fill = author, alpha = sentiment)) +
+  geom_col(position = position_dodge()) +
+  scale_alpha_manual(values = c(0.5, 1)) +
+  labs(x = "Sentiment", y = "Count", title = "Sentiment Analysis by Author in Federalist Papers") +
+  facet_wrap(vars(author)) +
+  theme_bw()
+
+```
+
+Sentiment Analysis by Author and Paper
+```{r}
+papers_sentiment <- papers %>%
+  drop_na(text) %>%
+  # Split into word tokens
+  unnest_tokens(word, text) %>%
+  # Remove stop words and specific old-timey words
+  anti_join(stop_words) %>%
+  filter(!word %in% c("the", "that", "a", "and", "to", "of", 
+                      "in", "for", "is", "on", "be", "with", 
+                      "as", "by", "not", "it", "at", 
+                      "thou", "thy", "haue", "thee", 
+                      "thine", "enter", "exeunt", "exit")) %>%
+  # Join the sentiment dictionary
+  inner_join(get_sentiments("bing")) %>%
+  # Count positive and negative words for each author by paper
+  count(author, no, sentiment) %>%
+  # Pivot to get positive and negative counts in separate columns
+  pivot_wider(names_from = sentiment, values_from = n, values_fill = list(n = 0)) %>%
+  # Calculate net sentiment
+  mutate(sentiment = positive - negative)
+
+# Create the ggplot visualization
+ggplot(papers_sentiment, aes(x = factor(no), y = sentiment, fill = sentiment)) +
+  geom_col() +
+  scale_fill_viridis_c(option = "magma", end = 0.9) +
+  labs(x = "Federalist Paper Number", y = "Net Sentiment", 
+       title = "Net Sentiment Analysis by Author in Federalist Papers") +
+  facet_wrap(vars(author), scales = "free_x") +
+  theme_bw()
+```
+
+
+3. Implement the code from the website, https://bit.ly/3tFYetB. This code does not work as written since it was done in 2019. Do not try to use the **furrr** package in RStudio cloud. Notice that the analyst includes the co-authored papers in Madison's papers. Do you want to do this?  
+
+4. Write a report using what you learned from steps 1 through 3 above. It is a report, not simply a listing of your code. However, it must be reproducible, so write it so that your code is accessible.  Turn in a pdf report of your work. 
+
+
+## Part 3 - Prediction (120 points) Due Lesson M40 by 1600. 
+
+In this section, you will use your own machine learning skills to build at least two models to assign authorship to the disputed papers.  
+
+A required resource for you is the book *Supervised Machine Learning for Text Analysis in R*, https://smltar.com/. Use chapters 2, 4, 5 and 7 to guide your work.
+
+1. You must use a less flexible model like naive Bayes, LDA, or logistic regression.
+
+2. You must use a complex, or flexible model, like random forests with xgboost or catboost, or a neural network. If you use a boosting method these websites will help:  
+- https://www.r-bloggers.com/2020/08/how-to-use-catboost-with-tidymodels/   
+- https://www.tychobra.com/posts/2020-05-19-xgboost-with-tidymodels/    
+If you use a neural network, chapters 8 and 9 of the *Supervised Machine Learning for Text Analysis* will help.
+
+3. Write a report summarizing the work from this section, as well as a conclusion for the entire project. The report must be compiled as a pdf.
+
+
+## Documenting file creation 
+
+It's useful to record some information about how your file was created.
+
+  * File creation date: `r Sys.Date()`
+  * `r R.version.string`
+  * R version (short form): `r getRversion()`
+  * `tidyverse` package version: `r packageVersion("tidyverse")`
+  * `tidymodels` package version: `r packageVersion("tidymodels")`
+  * Additional session information
+  
+
+  
